@@ -7,30 +7,6 @@
  */
 package com.opentok.util;
 
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.SocketAddress;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-
-import org.asynchttpclient.AsyncHttpClientConfig;
-import org.asynchttpclient.DefaultAsyncHttpClient;
-import org.asynchttpclient.DefaultAsyncHttpClientConfig;
-import org.asynchttpclient.Realm;
-import org.asynchttpclient.Realm.AuthScheme;
-import org.asynchttpclient.RequestBuilder;
-import org.asynchttpclient.Response;
-import org.asynchttpclient.filter.FilterContext;
-import org.asynchttpclient.filter.FilterException;
-import org.asynchttpclient.filter.RequestFilter;
-import org.asynchttpclient.proxy.ProxyServer;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -40,20 +16,33 @@ import com.opentok.constants.DefaultApiUrl;
 import com.opentok.constants.Version;
 import com.opentok.exception.OpenTokException;
 import com.opentok.exception.RequestException;
+import org.asynchttpclient.*;
+import org.asynchttpclient.Realm.AuthScheme;
+import org.asynchttpclient.filter.FilterContext;
+import org.asynchttpclient.filter.FilterException;
+import org.asynchttpclient.filter.RequestFilter;
+import org.asynchttpclient.proxy.ProxyServer;
 
-public class HttpClient extends DefaultAsyncHttpClient {
-    
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.SocketAddress;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+
+public class HttpClientAsync extends DefaultAsyncHttpClient {
+
     private final String apiUrl;
     private final int apiKey;
 
-    private HttpClient(Builder builder) {
+    private HttpClientAsync(Builder builder) {
         super(builder.config);
         this.apiKey = builder.apiKey;
         this.apiUrl = builder.apiUrl;
     }
 
-    public String createSession(Map<String, Collection<String>> params) throws RequestException {
-        Response response = null;
+    public CompletableFuture<String> createSession(Map<String, Collection<String>> params) {
         Map<String, List<String>> paramsWithList = null;
         if (params != null) {
             paramsWithList = new HashMap<>();
@@ -62,33 +51,32 @@ public class HttpClient extends DefaultAsyncHttpClient {
             }
         }
 
-        Future<Response> request = this.preparePost(this.apiUrl + "/session/create")
+        return this.preparePost(this.apiUrl + "/session/create")
                 .setFormParams(paramsWithList)
                 .addHeader("Accept", "application/json") // XML version is deprecated
-                .execute();
-
-        try {
-            response = request.get();
-            return ClientResponseUtils.parseCreateSessionResponse(response);
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not create an OpenTok Session", e);
-        }
+                .execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseCreateSessionResponse(response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String getArchive(String archiveId) throws RequestException {
+    public CompletableFuture<String> getArchive(final String archiveId) {
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive/" + archiveId;
-        Future<Response> request = this.prepareGet(url).execute();
-
-        try {
-            Response response = request.get();
-            return ClientResponseUtils.parseGetArchiveResponse(archiveId, response);
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not  get an OpenTok Archive", e);
-        }
+        return this.prepareGet(url).execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseGetArchiveResponse(archiveId, response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String getArchives(int offset, int count) throws RequestException {
-        // TODO: maybe use a StringBuilder?
+    public CompletableFuture<String> getArchives(int offset, int count) {
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive";
         if (offset != 0 || count != 1000) {
             url += "?";
@@ -100,30 +88,31 @@ public class HttpClient extends DefaultAsyncHttpClient {
             }
         }
 
-        Future<Response> request = this.prepareGet(url).execute();
-
-        try {
-            return ClientResponseUtils.parseGetArchivesResponse(request.get());
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not get OpenTok Archives", e);
-        }
+        return this.prepareGet(url).execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseGetArchivesResponse(response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String getArchives(String sessionId) throws RequestException {
+    public CompletableFuture<String> getArchives(String sessionId) {
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive?sessionId=" + sessionId;
 
-        Future<Response> request = this.prepareGet(url).execute();
-        try {
-            return ClientResponseUtils.parseGetArchivesResponse(request.get());
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not get OpenTok Archives", e);
-        }
+        return this.prepareGet(url).execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseGetArchivesResponse(response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String startArchive(String sessionId, ArchiveProperties properties)
-            throws OpenTokException {
+    public CompletableFuture<String> startArchive(String sessionId, ArchiveProperties properties) {
         String requestBody = null;
-        // TODO: maybe use a StringBuilder?
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive";
 
         JsonNodeFactory nodeFactory = JsonNodeFactory.instance;
@@ -132,7 +121,7 @@ public class HttpClient extends DefaultAsyncHttpClient {
         requestJson.put("hasVideo", properties.hasVideo());
         requestJson.put("hasAudio", properties.hasAudio());
         requestJson.put("outputMode", properties.outputMode().toString());
-        if(properties.layout() != null) {
+        if (properties.layout() != null) {
             ObjectNode layout = requestJson.putObject("layout");
             layout.put("type", properties.layout().getType().toString());
             layout.put("stylesheet", properties.layout().getStylesheet());
@@ -143,43 +132,47 @@ public class HttpClient extends DefaultAsyncHttpClient {
         try {
             requestBody = new ObjectMapper().writeValueAsString(requestJson);
         } catch (JsonProcessingException e) {
-            throw new OpenTokException("Could not start an OpenTok Archive. The JSON body encoding failed.", e);
+            CompletableFuture<String> future = new CompletableFuture<>();
+            future.completeExceptionally(new OpenTokException("Could not start an OpenTok Archive. The JSON body encoding failed.", e));
+            return future;
         }
-        Future<Response> request = this.preparePost(url)
+        return this.preparePost(url)
                 .setBody(requestBody)
                 .setHeader("Content-Type", "application/json")
-                .execute();
-
-        try {
-            return ClientResponseUtils.parseStartArchiveResponse(sessionId, request.get());
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not start an OpenTok Archive.", e);
-        }
+                .execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseStartArchiveResponse(sessionId, response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String stopArchive(String archiveId) throws RequestException {
-        // TODO: maybe use a StringBuilder?
+    public CompletableFuture<String> stopArchive(String archiveId) {
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive/" + archiveId + "/stop";
-        Future<Response> request = this.preparePost(url).execute();
-
-        try {
-            return ClientResponseUtils.parseStopArchiveResponse(archiveId, request.get());
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not stop an OpenTok Archive.", e);
-        }
+        return this.preparePost(url).execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseStopArchiveResponse(archiveId, response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
 
-    public String deleteArchive(String archiveId) throws RequestException {
+    public CompletableFuture<String> deleteArchive(String archiveId) {
         String url = this.apiUrl + "/v2/project/" + this.apiKey + "/archive/" + archiveId;
-        Future<Response> request = this.prepareDelete(url).execute();
-
-        try {
-            return ClientResponseUtils.parseDeleteArchiveResponse(archiveId, request.get());
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RequestException("Could not delete an OpenTok Archive. archiveId = " + archiveId, e);
-        }
+        return this.prepareDelete(url).execute().toCompletableFuture()
+                .thenApply(response -> {
+                    try {
+                        return ClientResponseUtils.parseDeleteArchiveResponse(archiveId, response);
+                    } catch (RequestException ex) {
+                        throw new CompletionException(ex);
+                    }
+                });
     }
-    
+
     public static enum ProxyAuthScheme {
         BASIC,
         DIGEST,
@@ -212,7 +205,7 @@ public class HttpClient extends DefaultAsyncHttpClient {
             proxy(proxy, null, null, null);
             return this;
         }
-        
+
         public Builder proxy(Proxy proxy, ProxyAuthScheme proxyAuthScheme, String principal, String password) {
             this.proxy = proxy;
             this.proxyAuthScheme = proxyAuthScheme;
@@ -221,21 +214,21 @@ public class HttpClient extends DefaultAsyncHttpClient {
             return this;
         }
 
-        public HttpClient build() {
+        public HttpClientAsync build() {
             DefaultAsyncHttpClientConfig.Builder configBuilder = new DefaultAsyncHttpClientConfig.Builder()
                     .setUserAgent("Opentok-Java-SDK/" + Version.VERSION + " JRE/" + System.getProperty("java.version"))
                     .addRequestFilter(new TokenAuthRequestFilter(this.apiKey, this.apiSecret));
             if (this.apiUrl == null) {
-                this.apiUrl=DefaultApiUrl.DEFAULT_API_URI;
+                this.apiUrl = DefaultApiUrl.DEFAULT_API_URI;
             }
-            
+
             if (this.proxy != null) {
                 configBuilder.setProxyServer(createProxyServer(this.proxy, this.proxyAuthScheme, this.principal, this.password));
             }
-            
+
             this.config = configBuilder.build();
             // NOTE: not thread-safe, config could be modified by another thread here?
-            HttpClient client = new HttpClient(this);
+            HttpClientAsync client = new HttpClientAsync(this);
             return client;
         }
 
@@ -255,36 +248,36 @@ public class HttpClient extends DefaultAsyncHttpClient {
             }
 
             InetSocketAddress isa = (InetSocketAddress) sa;
-            
+
             final String isaHost = isa.isUnresolved() ? isa.getHostName() : isa.getAddress().getHostAddress();
             ProxyServer.Builder builder = new ProxyServer.Builder(isaHost, isa.getPort());
 
             if (principal != null) {
-                Realm.AuthScheme authScheme = null;
+                AuthScheme authScheme = null;
                 switch (proxyAuthScheme) {
-                case BASIC:
-                    authScheme = AuthScheme.BASIC;
-                    break;
-                case DIGEST:
-                    authScheme = AuthScheme.DIGEST;
-                    break;
-                case NTLM:
-                    authScheme = AuthScheme.NTLM;
-                    break;
-                case KERBEROS:
-                    authScheme = AuthScheme.KERBEROS;
-                    break;
-                case SPNEGO:
-                    authScheme = AuthScheme.SPNEGO;
-                    break;
+                    case BASIC:
+                        authScheme = AuthScheme.BASIC;
+                        break;
+                    case DIGEST:
+                        authScheme = AuthScheme.DIGEST;
+                        break;
+                    case NTLM:
+                        authScheme = AuthScheme.NTLM;
+                        break;
+                    case KERBEROS:
+                        authScheme = AuthScheme.KERBEROS;
+                        break;
+                    case SPNEGO:
+                        authScheme = AuthScheme.SPNEGO;
+                        break;
                 }
-                
+
                 Realm.Builder rb = new Realm.Builder(principal, password);
                 rb.setScheme(authScheme);
-                
+
                 builder.setRealm(rb.build());
             }
-            
+
             return builder.build();
         }
     }
